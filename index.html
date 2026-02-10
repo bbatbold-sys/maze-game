@@ -168,6 +168,28 @@
         let breakCharges = 0;
         let sliding = false;
 
+        // Smooth movement
+        let displayX = 1;
+        let displayY = 1;
+        let animating = false;
+        const ANIM_SPEED = 0.18;
+
+        function animationLoop() {
+            const dx = player.x - displayX;
+            const dy = player.y - displayY;
+            if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+                displayX += dx * ANIM_SPEED;
+                displayY += dy * ANIM_SPEED;
+                animating = true;
+            } else {
+                displayX = player.x;
+                displayY = player.y;
+                animating = false;
+            }
+            draw();
+            requestAnimationFrame(animationLoop);
+        }
+
         function pickRandomVariation() {
             return VARIATIONS[Math.floor(Math.random() * VARIATIONS.length)];
         }
@@ -361,7 +383,7 @@
                 for (let x = 0; x < COLS; x++) {
                     const cellVal = grid[y][x];
                     if (isDark) {
-                        const dist = distTo(player.x, player.y, x, y);
+                        const dist = distTo(displayX, displayY, x, y);
                         if (dist > darkRevealRadius) {
                             ctx.fillStyle = '#0a0a15';
                             ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
@@ -394,7 +416,7 @@
             for (let y = 0; y < ROWS; y++) {
                 for (let x = 0; x < COLS; x++) {
                     if (grid[y][x] === 1) {
-                        if (isDark && distTo(player.x, player.y, x, y) > darkRevealRadius) continue;
+                        if (isDark && distTo(displayX, displayY, x, y) > darkRevealRadius) continue;
                         ctx.strokeRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
                     }
                 }
@@ -484,7 +506,7 @@
             }
 
             // Exit (check visibility in dark mode)
-            if (!isDark || distTo(player.x, player.y, exit.x, exit.y) <= darkRevealRadius) {
+            if (!isDark || distTo(displayX, displayY, exit.x, exit.y) <= darkRevealRadius) {
                 ctx.fillStyle = '#00e676';
                 ctx.shadowColor = '#00e676';
                 ctx.shadowBlur = 12;
@@ -492,23 +514,21 @@
                 ctx.shadowBlur = 0;
             }
 
-            // Player
+            // Player (smooth position)
+            const playerPxX = displayX * CELL_SIZE + CELL_SIZE / 2;
+            const playerPxY = displayY * CELL_SIZE + CELL_SIZE / 2;
             ctx.fillStyle = '#e94560';
             ctx.shadowColor = '#e94560';
             ctx.shadowBlur = 10;
             ctx.beginPath();
-            ctx.arc(
-                player.x * CELL_SIZE + CELL_SIZE / 2,
-                player.y * CELL_SIZE + CELL_SIZE / 2,
-                CELL_SIZE / 3, 0, Math.PI * 2
-            );
+            ctx.arc(playerPxX, playerPxY, CELL_SIZE / 3, 0, Math.PI * 2);
             ctx.fill();
             ctx.shadowBlur = 0;
 
             // Dark mode: overlay radial gradient for smooth falloff
             if (isDark) {
-                const px = player.x * CELL_SIZE + CELL_SIZE / 2;
-                const py = player.y * CELL_SIZE + CELL_SIZE / 2;
+                const px = playerPxX;
+                const py = playerPxY;
                 const radius = (darkRevealRadius + 0.5) * CELL_SIZE;
                 const grad = ctx.createRadialGradient(px, py, radius * 0.4, px, py, radius);
                 grad.addColorStop(0, 'rgba(10,10,21,0)');
@@ -558,7 +578,7 @@
             }
 
             if (mode === 'Ice Maze') {
-                // Slide until hitting a wall
+                // Slide until hitting a wall — compute final position
                 sliding = true;
                 let nx = player.x + dx;
                 let ny = player.y + dy;
@@ -566,30 +586,40 @@
                     sliding = false;
                     return;
                 }
-                function slideStep() {
-                    player.x = nx;
-                    player.y = ny;
-                    checkPickups();
-                    if (player.x === exit.x && player.y === exit.y) {
-                        won = true;
-                        stopTimer();
-                        sliding = false;
-                        draw();
-                        return;
-                    }
+                // Find final resting position
+                const slidePositions = [];
+                while (canMoveTo(nx, ny)) {
+                    slidePositions.push({ x: nx, y: ny });
                     const nextX = nx + dx;
                     const nextY = ny + dy;
                     if (canMoveTo(nextX, nextY)) {
                         nx = nextX;
                         ny = nextY;
-                        draw();
-                        setTimeout(slideStep, 50);
                     } else {
-                        sliding = false;
-                        draw();
+                        break;
                     }
                 }
-                slideStep();
+                // Animate through each position
+                let slideIdx = 0;
+                function slideNext() {
+                    if (slideIdx >= slidePositions.length) {
+                        sliding = false;
+                        return;
+                    }
+                    const pos = slidePositions[slideIdx];
+                    player.x = pos.x;
+                    player.y = pos.y;
+                    checkPickups();
+                    slideIdx++;
+                    if (player.x === exit.x && player.y === exit.y) {
+                        won = true;
+                        stopTimer();
+                        sliding = false;
+                        return;
+                    }
+                    setTimeout(slideNext, 80);
+                }
+                slideNext();
                 return;
             }
 
@@ -603,7 +633,6 @@
                     won = true;
                     stopTimer();
                 }
-                draw();
             }
         }
 
@@ -653,7 +682,6 @@
                     grid[wy][wx] = 0;
                     breakCharges--;
                     updateStatusBar();
-                    draw();
                     return;
                 }
             }
@@ -675,6 +703,9 @@
             varDescEl.textContent = currentVariation.desc;
             levelNumEl.textContent = currentLevel;
 
+            displayX = 1;
+            displayY = 1;
+
             generateMaze();
 
             // Setup variation-specific elements
@@ -687,24 +718,10 @@
             updateStatusBar();
             startTimer();
             draw();
-
-            // Animate portals
-            if (mode === 'Portal Maze') {
-                cancelAnimationFrame(portalAnimFrame);
-                animatePortals();
-            }
-        }
-
-        let portalAnimFrame = 0;
-        function animatePortals() {
-            if (currentVariation.name !== 'Portal Maze' || won) return;
-            draw();
-            portalAnimFrame = requestAnimationFrame(animatePortals);
         }
 
         newGameBtn.addEventListener('click', () => {
             currentLevel++;
-            cancelAnimationFrame(portalAnimFrame);
             startGame();
         });
 
@@ -723,6 +740,7 @@
         });
 
         startGame();
+        requestAnimationFrame(animationLoop);
     </script>
 </body>
 </html>
