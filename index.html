@@ -122,9 +122,9 @@
         const extraHudEl = document.getElementById('extraHud');
         const statusBar = document.getElementById('status-bar');
 
-        const CELL_SIZE = 30;
-        const COLS = 21;
-        const ROWS = 15;
+        const CELL_SIZE = 18;
+        const COLS = 41;
+        const ROWS = 31;
         canvas.width = COLS * CELL_SIZE;
         canvas.height = ROWS * CELL_SIZE;
 
@@ -136,10 +136,10 @@
             { name: 'Portal Maze',      desc: 'Step on portals to teleport!' },
             { name: 'Key & Lock',       desc: 'Collect keys to unlock doors!' },
             { name: 'Mirror Maze',      desc: 'Controls reverse every few seconds!' },
-            { name: 'Breakable Walls',  desc: 'Press Space to break a wall! 5 charges!' },
+            { name: 'Breakable Walls',  desc: 'Press Space to break a wall! 10 charges!' },
             { name: 'Fog of War',       desc: 'Walls appear only after you walk near them!' },
             { name: 'Gravity Maze',     desc: 'You fall downward! Use arrows to move left/right!' },
-            { name: 'Speed Run',        desc: 'Solve it in 30 seconds or the maze resets!' },
+            { name: 'Speed Run',        desc: 'Solve it in 60 seconds or the maze resets!' },
             { name: 'Shrinking Maze',   desc: 'Walls close in over time — hurry!' },
             { name: 'One-Way Doors',    desc: 'Some passages only work in one direction!' },
             { name: 'Teleport Traps',   desc: 'Red tiles teleport you to a random spot!' },
@@ -166,7 +166,7 @@
         let timerInterval = null;
 
         // Variation-specific state
-        let darkRevealRadius = 3;
+        let darkRevealRadius = 5;
         let portals = [];
         let keys = [];
         let locks = [];
@@ -180,7 +180,7 @@
         let revealed = [];
 
         // Speed Run
-        let speedRunLimit = 30;
+        let speedRunLimit = 60;
 
         // Shrinking
         let shrinkTimer = null;
@@ -408,7 +408,7 @@
             const dirs = [{dx:1,dy:0},{dx:-1,dy:0},{dx:0,dy:1},{dx:0,dy:-1}];
             let count = 0;
             for (const p of paths) {
-                if (count >= 8) break;
+                if (count >= 15) break;
                 const dir = dirs[Math.floor(Math.random() * dirs.length)];
                 const nx = p.x + dir.dx, ny = p.y + dir.dy;
                 if (nx > 0 && nx < COLS-1 && ny > 0 && ny < ROWS-1 && grid[ny][nx] === 0) {
@@ -421,7 +421,7 @@
         function setupTeleportTraps() {
             trapTiles = [];
             const paths = shuffleArray(getPathCells());
-            for (let i = 0; i < 6 && i < paths.length; i++) {
+            for (let i = 0; i < 12 && i < paths.length; i++) {
                 trapTiles.push(paths[i]);
             }
         }
@@ -513,10 +513,10 @@
         function setupMemoryMaze() {
             memoryPhase = 'showing';
             clearTimeout(memoryTimeout);
-            // Show the maze for 3 seconds, then hide walls
+            // Show the maze for 5 seconds, then hide walls
             memoryTimeout = setTimeout(() => {
                 memoryPhase = 'playing';
-            }, 3000);
+            }, 5000);
         }
 
         // ========== STATUS BAR ==========
@@ -983,7 +983,7 @@
             const mode = currentVariation.name;
             if (mode === 'Portal Maze') setupPortals();
             if (mode === 'Key & Lock') setupKeysAndLocks();
-            if (mode === 'Breakable Walls') { breakCharges = 5; }
+            if (mode === 'Breakable Walls') { breakCharges = 10; }
             if (mode === 'Mirror Maze') setupMirror();
             if (mode === 'Fog of War') setupFogOfWar();
             if (mode === 'Gravity Maze') { setTimeout(() => gravityFall(), 200); }
