@@ -138,7 +138,7 @@
             { name: 'Mirror Maze',      desc: 'Controls reverse every few seconds!' },
             { name: 'Breakable Walls',  desc: 'Press Space to break a wall! 10 charges!' },
             { name: 'Fog of War',       desc: 'Walls appear only after you walk near them!' },
-            { name: 'Gravity Maze',     desc: 'Left/Right rotate the maze! Gravity pulls you down!' },
+            { name: 'Gravity Maze',     desc: 'Left/Right rotate 1° at a time! Gravity always pulls down!' },
             { name: 'Speed Run',        desc: 'Solve it in 60 seconds or the maze resets!' },
             { name: 'Shrinking Maze',   desc: 'Walls close in over time — hurry!' },
             { name: 'One-Way Doors',    desc: 'Some passages only work in one direction!' },
@@ -206,6 +206,8 @@
 
         // Gravity
         let gravityFalling = false;
+        let gravityAngle = 0; // degrees of maze rotation
+        let gravityInterval = null;
 
         // Memory Maze
         let memoryPhase = 'showing'; // 'showing' or 'playing'
@@ -262,6 +264,7 @@
             clearInterval(shrinkTimer);
             clearInterval(ghostTimer);
             clearInterval(rotateTimer);
+            clearInterval(gravityInterval);
             clearTimeout(memoryTimeout);
         }
 
@@ -574,6 +577,17 @@
             const isFog = mode === 'Fog of War';
             const isMemoryHidden = mode === 'Memory Maze' && memoryPhase === 'playing';
 
+            // Gravity maze: rotate entire canvas
+            const isGravity = mode === 'Gravity Maze';
+            if (isGravity) {
+                ctx.save();
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
+                ctx.translate(cx, cy);
+                ctx.rotate(gravityAngle * Math.PI / 180);
+                ctx.translate(-cx, -cy);
+            }
+
             // Draw base maze
             for (let y = 0; y < ROWS; y++) {
                 for (let x = 0; x < COLS; x++) {
@@ -744,26 +758,6 @@
                 ctx.fill(); ctx.shadowBlur = 0;
             }
 
-            // Gravity indicator — show gravity direction arrow at bottom center
-            if (mode === 'Gravity Maze') {
-                const arrowX = canvas.width / 2;
-                const arrowY = canvas.height - 12;
-                ctx.fillStyle = 'rgba(255, 159, 67, 0.6)';
-                ctx.beginPath();
-                ctx.moveTo(arrowX - 10, arrowY - 6);
-                ctx.lineTo(arrowX, arrowY + 6);
-                ctx.lineTo(arrowX + 10, arrowY - 6);
-                ctx.closePath();
-                ctx.fill();
-                // Left/Right rotation hints
-                ctx.font = '11px sans-serif';
-                ctx.fillStyle = 'rgba(255, 159, 67, 0.5)';
-                ctx.textAlign = 'left';
-                ctx.fillText('< Flip', 8, canvas.height - 6);
-                ctx.textAlign = 'right';
-                ctx.fillText('Flip >', canvas.width - 8, canvas.height - 6);
-                ctx.textAlign = 'start';
-            }
 
             // Exit
             const showExit = (!isDark || distTo(displayX, displayY, exit.x, exit.y) <= darkRevealRadius) && (!isFog || revealed[exit.y][exit.x]);
@@ -795,6 +789,20 @@
             if (mode === 'Mirror Maze' && mirrorFlipped) {
                 ctx.fillStyle = 'rgba(255, 100, 100, 0.15)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            // Restore canvas after gravity rotation
+            if (isGravity) {
+                ctx.restore();
+                // Draw angle indicator on top (not rotated)
+                ctx.fillStyle = 'rgba(255, 159, 67, 0.7)';
+                ctx.font = 'bold 13px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(Math.round(gravityAngle % 360) + '°', canvas.width / 2, 16);
+                ctx.font = '11px sans-serif';
+                ctx.fillStyle = 'rgba(255, 159, 67, 0.5)';
+                ctx.fillText('< Left / Right >', canvas.width / 2, canvas.height - 6);
+                ctx.textAlign = 'start';
             }
 
             if (won) {
@@ -832,11 +840,11 @@
             // Mirror
             if (mode === 'Mirror Maze' && mirrorFlipped) { dx = -dx; dy = -dy; }
 
-            // Gravity: left/right rotate the maze, no direct movement
+            // Gravity: left/right rotate by 1 degree, no direct movement
             if (mode === 'Gravity Maze') {
-                if (dx === -1) { rotateGravityMaze('ccw'); return; }
-                if (dx === 1) { rotateGravityMaze('cw'); return; }
-                return; // no up/down movement allowed
+                if (dx === -1) { gravityAngle -= 1; }
+                if (dx === 1) { gravityAngle += 1; }
+                return;
             }
 
             // Ice slide
@@ -895,57 +903,39 @@
             }
         }
 
-        function gravityFall() {
-            if (won || gravityFalling) return;
-            gravityFalling = true;
-            function fallStep() {
-                if (won) { gravityFalling = false; return; }
-                const ny = player.y + 1;
-                if (ny < ROWS && canMoveTo(player.x, ny)) {
-                    player.y = ny;
-                    checkPickups();
-                    if (player.x === exit.x && player.y === exit.y) { won = true; stopTimer(); gravityFalling = false; return; }
-                    setTimeout(fallStep, 60);
-                } else {
-                    gravityFalling = false;
-                }
+        function getGravityDirection() {
+            // Map gravityAngle to a grid direction
+            // The canvas is rotated by gravityAngle, so "screen down" in grid space
+            // is the opposite rotation applied to (0,1)
+            const rad = -gravityAngle * Math.PI / 180;
+            const gx = Math.round(Math.sin(rad));
+            const gy = Math.round(Math.cos(rad));
+            // Snap to cardinal: pick the dominant axis
+            if (Math.abs(gx) >= Math.abs(gy)) {
+                return { dx: gx > 0 ? 1 : -1, dy: 0 };
+            } else {
+                return { dx: 0, dy: gy > 0 ? 1 : -1 };
             }
-            fallStep();
         }
 
-        function rotateGravityMaze(dir) {
-            if (won || gravityFalling) return;
-            // Rotate grid 90 degrees
-            // CW: new[x][ROWS-1-y] = old[y][x]  — but grid is non-square so we need to handle it
-            // Since grid is ROWS x COLS and non-square, we mirror instead for consistent dimensions
-            if (dir === 'cw') {
-                // Mirror vertically (top becomes bottom) then transpose-ish
-                // Simpler: just rotate all rows by reversing column order
-                // Actually let's do a proper rotation within the same dimensions
-                // We'll mirror the grid left-to-right
-                for (let y = 0; y < ROWS; y++) {
-                    grid[y].reverse();
-                }
-                player.x = COLS - 1 - player.x;
-                exit.x = COLS - 1 - exit.x;
-            } else {
-                // Mirror top-to-bottom
-                for (let x = 0; x < COLS; x++) {
-                    for (let y = 0; y < Math.floor(ROWS / 2); y++) {
-                        const temp = grid[y][x];
-                        grid[y][x] = grid[ROWS - 1 - y][x];
-                        grid[ROWS - 1 - y][x] = temp;
-                    }
-                }
-                player.y = ROWS - 1 - player.y;
-                exit.y = ROWS - 1 - exit.y;
+        function gravityTick() {
+            if (won || !currentVariation || currentVariation.name !== 'Gravity Maze') return;
+            const dir = getGravityDirection();
+            const nx = player.x + dir.dx;
+            const ny = player.y + dir.dy;
+            if (canMoveTo(nx, ny)) {
+                player.x = nx;
+                player.y = ny;
+                checkPickups();
+                if (player.x === exit.x && player.y === exit.y) { won = true; stopTimer(); }
             }
-            displayX = player.x;
-            displayY = player.y;
-            grid[player.y][player.x] = 0;
-            grid[exit.y][exit.x] = 0;
-            // After rotation, gravity pulls down
-            setTimeout(() => gravityFall(), 100);
+        }
+
+        function setupGravity() {
+            gravityAngle = 0;
+            gravityFalling = false;
+            clearInterval(gravityInterval);
+            gravityInterval = setInterval(() => gravityTick(), 120);
         }
 
         function checkPickups() {
@@ -1034,7 +1024,7 @@
             if (mode === 'Breakable Walls') { breakCharges = 10; }
             if (mode === 'Mirror Maze') setupMirror();
             if (mode === 'Fog of War') setupFogOfWar();
-            if (mode === 'Gravity Maze') { gravityFalling = false; setTimeout(() => gravityFall(), 200); }
+            if (mode === 'Gravity Maze') setupGravity();
             if (mode === 'Shrinking Maze') setupShrinking();
             if (mode === 'One-Way Doors') setupOneWayDoors();
             if (mode === 'Teleport Traps') setupTeleportTraps();
