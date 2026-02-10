@@ -125,8 +125,11 @@
         const CELL_SIZE = 18;
         const COLS = 41;
         const ROWS = 31;
-        canvas.width = COLS * CELL_SIZE;
-        canvas.height = ROWS * CELL_SIZE;
+        const MAZE_W = COLS * CELL_SIZE;
+        const MAZE_H = ROWS * CELL_SIZE;
+        const MAZE_DIAG = Math.ceil(Math.sqrt(MAZE_W * MAZE_W + MAZE_H * MAZE_H));
+        canvas.width = MAZE_W;
+        canvas.height = MAZE_H;
 
         // All 17 variations — one per level
         const VARIATIONS = [
@@ -577,15 +580,19 @@
             const isFog = mode === 'Fog of War';
             const isMemoryHidden = mode === 'Memory Maze' && memoryPhase === 'playing';
 
-            // Gravity maze: rotate entire canvas
+            // Gravity maze: rotate entire canvas around center, offset maze to center
             const isGravity = mode === 'Gravity Maze';
             if (isGravity) {
+                // Fill background
+                ctx.fillStyle = '#0a0a15';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.save();
                 const cx = canvas.width / 2;
                 const cy = canvas.height / 2;
                 ctx.translate(cx, cy);
                 ctx.rotate(gravityAngle * Math.PI / 180);
-                ctx.translate(-cx, -cy);
+                // Offset so maze draws centered
+                ctx.translate(-MAZE_W / 2, -MAZE_H / 2);
             }
 
             // Draw base maze
@@ -794,14 +801,22 @@
             // Restore canvas after gravity rotation
             if (isGravity) {
                 ctx.restore();
-                // Draw angle indicator on top (not rotated)
+                // Draw angle + gravity arrow indicator (fixed on screen, not rotated)
+                const hcx = canvas.width / 2;
                 ctx.fillStyle = 'rgba(255, 159, 67, 0.7)';
-                ctx.font = 'bold 13px sans-serif';
+                ctx.font = 'bold 14px sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText(Math.round(gravityAngle % 360) + '°', canvas.width / 2, 16);
+                ctx.fillText(Math.round(((gravityAngle % 360) + 360) % 360) + '°', hcx, 18);
+                // Gravity arrow (always points down on screen)
+                ctx.beginPath();
+                ctx.moveTo(hcx - 8, canvas.height - 22);
+                ctx.lineTo(hcx, canvas.height - 10);
+                ctx.lineTo(hcx + 8, canvas.height - 22);
+                ctx.closePath();
+                ctx.fill();
                 ctx.font = '11px sans-serif';
-                ctx.fillStyle = 'rgba(255, 159, 67, 0.5)';
-                ctx.fillText('< Left / Right >', canvas.width / 2, canvas.height - 6);
+                ctx.fillStyle = 'rgba(255, 159, 67, 0.4)';
+                ctx.fillText('\u2190 Left / Right \u2192', hcx, canvas.height - 2);
                 ctx.textAlign = 'start';
             }
 
@@ -1014,6 +1029,15 @@
             varNameEl.textContent = currentVariation.name;
             varDescEl.textContent = currentVariation.desc;
             levelNumEl.textContent = currentLevel;
+
+            // Resize canvas for gravity mode (needs room for rotation)
+            if (currentVariation.name === 'Gravity Maze') {
+                canvas.width = MAZE_DIAG;
+                canvas.height = MAZE_DIAG;
+            } else {
+                canvas.width = MAZE_W;
+                canvas.height = MAZE_H;
+            }
 
             generateMaze();
 
