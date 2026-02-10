@@ -18,54 +18,132 @@
         }
         h1 {
             font-size: 2rem;
-            margin-bottom: 10px;
+            margin-bottom: 6px;
             color: #e94560;
         }
-        #info {
+        #hud {
+            display: flex;
+            gap: 30px;
+            margin-bottom: 8px;
+            font-size: 1rem;
+        }
+        #hud span { color: #aaa; }
+        #hud .value { color: #e94560; font-weight: bold; }
+        #variation-banner {
+            background: #0f3460;
+            padding: 8px 24px;
+            border-radius: 20px;
             margin-bottom: 10px;
             font-size: 1.1rem;
-            color: #aaa;
+            text-align: center;
         }
+        #variation-banner .name { color: #e94560; font-weight: bold; }
+        #variation-banner .desc { color: #aaa; font-size: 0.9rem; }
         canvas {
             border: 3px solid #e94560;
             border-radius: 6px;
             background: #16213e;
         }
         #message {
-            margin-top: 15px;
+            margin-top: 12px;
             font-size: 1.3rem;
             min-height: 30px;
         }
-        #controls {
+        #bottom-bar {
             margin-top: 10px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        button {
+            background: #e94560;
+            color: #fff;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background: #c73652; }
+        #controls {
             color: #666;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
     </style>
 </head>
 <body>
     <h1>Maze Game</h1>
-    <div id="info">Use arrow keys to navigate</div>
+    <div id="hud">
+        <span>Level: <span class="value" id="levelNum">1</span></span>
+        <span>Time: <span class="value" id="timer">0:00</span></span>
+    </div>
+    <div id="variation-banner">
+        <div class="name" id="varName">Classic</div>
+        <div class="desc" id="varDesc">Standard maze — find the exit!</div>
+    </div>
     <canvas id="mazeCanvas"></canvas>
     <div id="message"></div>
-    <div id="controls">Arrow Keys = Move | Reach the green exit to win</div>
+    <div id="bottom-bar">
+        <button id="newGameBtn">New Game</button>
+        <div id="controls">Arrow Keys = Move | Reach the green exit to win</div>
+    </div>
 
     <script>
         const canvas = document.getElementById('mazeCanvas');
         const ctx = canvas.getContext('2d');
         const messageEl = document.getElementById('message');
+        const levelNumEl = document.getElementById('levelNum');
+        const timerEl = document.getElementById('timer');
+        const varNameEl = document.getElementById('varName');
+        const varDescEl = document.getElementById('varDesc');
+        const newGameBtn = document.getElementById('newGameBtn');
 
         const CELL_SIZE = 30;
         const COLS = 21;
         const ROWS = 15;
-
         canvas.width = COLS * CELL_SIZE;
         canvas.height = ROWS * CELL_SIZE;
+
+        // Variation definitions
+        const VARIATIONS = [
+            { name: 'Classic', desc: 'Standard maze — find the exit!' },
+            { name: 'Dark Maze', desc: 'Limited visibility — explore the darkness!' },
+            { name: 'Ice Maze', desc: 'You slide until you hit a wall!' },
+            { name: 'Portal Maze', desc: 'Step on portals to teleport!' },
+            { name: 'Key & Lock', desc: 'Collect keys to unlock doors!' },
+            { name: 'Mirror Maze', desc: 'Controls flip randomly!' },
+            { name: 'Breakable Walls', desc: 'Press Space to break a wall (limited uses)!' }
+        ];
 
         let grid = [];
         let player = { x: 1, y: 1 };
         let exit = { x: COLS - 2, y: ROWS - 2 };
         let won = false;
+        let currentLevel = 1;
+        let currentVariation = null;
+        let timerSeconds = 0;
+        let timerInterval = null;
+
+        function pickRandomVariation() {
+            return VARIATIONS[Math.floor(Math.random() * VARIATIONS.length)];
+        }
+
+        function startTimer() {
+            clearInterval(timerInterval);
+            timerSeconds = 0;
+            timerEl.textContent = '0:00';
+            timerInterval = setInterval(() => {
+                timerSeconds++;
+                const m = Math.floor(timerSeconds / 60);
+                const s = timerSeconds % 60;
+                timerEl.textContent = m + ':' + String(s).padStart(2, '0');
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+        }
 
         function initGrid() {
             grid = [];
@@ -142,7 +220,7 @@
                 }
             }
 
-            // Exit
+            // Exit glow
             ctx.fillStyle = '#00e676';
             ctx.shadowColor = '#00e676';
             ctx.shadowBlur = 12;
@@ -163,7 +241,7 @@
             ctx.shadowBlur = 0;
 
             if (won) {
-                messageEl.textContent = 'You escaped the maze!';
+                messageEl.textContent = 'You escaped! Time: ' + timerEl.textContent;
                 messageEl.style.color = '#00e676';
             }
         }
@@ -177,10 +255,29 @@
                 player.y = ny;
                 if (player.x === exit.x && player.y === exit.y) {
                     won = true;
+                    stopTimer();
                 }
                 draw();
             }
         }
+
+        function startGame() {
+            won = false;
+            player = { x: 1, y: 1 };
+            messageEl.textContent = '';
+            currentVariation = pickRandomVariation();
+            varNameEl.textContent = currentVariation.name;
+            varDescEl.textContent = currentVariation.desc;
+            levelNumEl.textContent = currentLevel;
+            generateMaze();
+            startTimer();
+            draw();
+        }
+
+        newGameBtn.addEventListener('click', () => {
+            currentLevel++;
+            startGame();
+        });
 
         document.addEventListener('keydown', (e) => {
             switch (e.key) {
@@ -191,8 +288,7 @@
             }
         });
 
-        generateMaze();
-        draw();
+        startGame();
     </script>
 </body>
 </html>
