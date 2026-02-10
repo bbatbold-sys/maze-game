@@ -23,9 +23,11 @@
         }
         #hud {
             display: flex;
-            gap: 30px;
+            gap: 20px;
             margin-bottom: 8px;
             font-size: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
         }
         #hud span { color: #aaa; }
         #hud .value { color: #e94560; font-weight: bold; }
@@ -70,6 +72,23 @@
             color: #666;
             font-size: 0.85rem;
         }
+        #status-bar {
+            margin-top: 6px;
+            display: flex;
+            gap: 12px;
+            font-size: 0.9rem;
+            min-height: 22px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .key-icon {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            vertical-align: middle;
+            margin-right: 2px;
+        }
     </style>
 </head>
 <body>
@@ -77,6 +96,7 @@
     <div id="hud">
         <span>Level: <span class="value" id="levelNum">1</span></span>
         <span>Time: <span class="value" id="timer">0:00</span></span>
+        <span id="extraHud"></span>
     </div>
     <div id="variation-banner">
         <div class="name" id="varName">Classic</div>
@@ -84,6 +104,7 @@
     </div>
     <canvas id="mazeCanvas"></canvas>
     <div id="message"></div>
+    <div id="status-bar" id="statusBar"></div>
     <div id="bottom-bar">
         <button id="newGameBtn">New Game</button>
         <div id="controls">Arrow Keys = Move | Reach the green exit to win</div>
@@ -98,6 +119,8 @@
         const varNameEl = document.getElementById('varName');
         const varDescEl = document.getElementById('varDesc');
         const newGameBtn = document.getElementById('newGameBtn');
+        const extraHudEl = document.getElementById('extraHud');
+        const statusBar = document.getElementById('status-bar');
 
         const CELL_SIZE = 30;
         const COLS = 21;
@@ -105,7 +128,6 @@
         canvas.width = COLS * CELL_SIZE;
         canvas.height = ROWS * CELL_SIZE;
 
-        // Variation definitions
         const VARIATIONS = [
             { name: 'Classic', desc: 'Standard maze — find the exit!' },
             { name: 'Dark Maze', desc: 'Limited visibility — explore the darkness!' },
@@ -113,8 +135,18 @@
             { name: 'Portal Maze', desc: 'Step on portals to teleport!' },
             { name: 'Key & Lock', desc: 'Collect keys to unlock doors!' },
             { name: 'Mirror Maze', desc: 'Controls flip randomly!' },
-            { name: 'Breakable Walls', desc: 'Press Space to break a wall (limited uses)!' }
+            { name: 'Breakable Walls', desc: 'Press Space to break a wall! Limited uses!' }
         ];
+
+        // Portal colors
+        const PORTAL_COLORS = [
+            ['#ff6b6b', '#ee5a24'], // red pair
+            ['#48dbfb', '#0abde3'], // cyan pair
+            ['#feca57', '#ff9f43'], // yellow pair
+        ];
+
+        // Key/Lock colors
+        const KEY_COLORS = ['#ff6b6b', '#48dbfb', '#feca57'];
 
         let grid = [];
         let player = { x: 1, y: 1 };
@@ -124,6 +156,17 @@
         let currentVariation = null;
         let timerSeconds = 0;
         let timerInterval = null;
+
+        // Variation-specific state
+        let darkRevealRadius = 3;
+        let portals = [];
+        let keys = [];
+        let locks = [];
+        let collectedKeys = [];
+        let mirrorFlipped = false;
+        let mirrorTimer = null;
+        let breakCharges = 0;
+        let sliding = false;
 
         function pickRandomVariation() {
             return VARIATIONS[Math.floor(Math.random() * VARIATIONS.length)];
@@ -143,6 +186,7 @@
 
         function stopTimer() {
             clearInterval(timerInterval);
+            clearInterval(mirrorTimer);
         }
 
         function initGrid() {
@@ -158,10 +202,8 @@
         function generateMaze() {
             initGrid();
             const stack = [];
-            const startX = 1;
-            const startY = 1;
-            grid[startY][startX] = 0;
-            stack.push({ x: startX, y: startY });
+            grid[1][1] = 0;
+            stack.push({ x: 1, y: 1 });
 
             const directions = [
                 { dx: 0, dy: -2 },
@@ -195,37 +237,260 @@
             grid[exit.y][exit.x] = 0;
         }
 
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+        function getPathCells() {
+            const cells = [];
             for (let y = 0; y < ROWS; y++) {
                 for (let x = 0; x < COLS; x++) {
+                    if (grid[y][x] === 0 && !(x === 1 && y === 1) && !(x === exit.x && y === exit.y)) {
+                        cells.push({ x, y });
+                    }
+                }
+            }
+            return cells;
+        }
+
+        function shuffleArray(arr) {
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        // --- PORTAL SETUP ---
+        function setupPortals() {
+            portals = [];
+            const paths = shuffleArray(getPathCells());
+            const numPairs = 3;
+            for (let i = 0; i < numPairs && paths.length >= 2; i++) {
+                const a = paths.pop();
+                const b = paths.pop();
+                portals.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y, color: i });
+            }
+        }
+
+        // --- KEY & LOCK SETUP ---
+        function setupKeysAndLocks() {
+            keys = [];
+            locks = [];
+            collectedKeys = [];
+            const paths = shuffleArray(getPathCells());
+
+            // Find wall cells adjacent to paths that we can turn into lockable doors
+            const wallCandidates = [];
+            for (let y = 1; y < ROWS - 1; y++) {
+                for (let x = 1; x < COLS - 1; x++) {
                     if (grid[y][x] === 1) {
-                        ctx.fillStyle = '#0f3460';
+                        // Check if it's a corridor wall (path on two opposite sides)
+                        const hPath = (x > 0 && x < COLS - 1 && grid[y][x - 1] === 0 && grid[y][x + 1] === 0);
+                        const vPath = (y > 0 && y < ROWS - 1 && grid[y - 1][x] === 0 && grid[y + 1][x] === 0);
+                        if (hPath || vPath) {
+                            wallCandidates.push({ x, y });
+                        }
+                    }
+                }
+            }
+
+            shuffleArray(wallCandidates);
+            const numLocks = Math.min(3, wallCandidates.length);
+
+            for (let i = 0; i < numLocks; i++) {
+                const wall = wallCandidates[i];
+                // Place lock on this wall (grid value 2+ means locked door)
+                grid[wall.y][wall.x] = 10 + i; // 10, 11, 12 for colored locks
+                locks.push({ x: wall.x, y: wall.y, color: i });
+
+                // Place key on a random path cell
+                if (paths.length > 0) {
+                    const keyPos = paths.pop();
+                    keys.push({ x: keyPos.x, y: keyPos.y, color: i, collected: false });
+                }
+            }
+        }
+
+        // --- BREAKABLE WALLS SETUP ---
+        function setupBreakableWalls() {
+            breakCharges = 5;
+        }
+
+        // --- MIRROR SETUP ---
+        function setupMirror() {
+            mirrorFlipped = false;
+            clearInterval(mirrorTimer);
+            mirrorTimer = setInterval(() => {
+                if (!won) {
+                    mirrorFlipped = !mirrorFlipped;
+                    updateStatusBar();
+                    draw();
+                }
+            }, 4000);
+        }
+
+        function updateStatusBar() {
+            statusBar.innerHTML = '';
+            const mode = currentVariation.name;
+
+            if (mode === 'Breakable Walls') {
+                statusBar.innerHTML = `<span style="color:#feca57">Charges: ${breakCharges}</span>`;
+            } else if (mode === 'Key & Lock') {
+                let html = '';
+                for (let i = 0; i < keys.length; i++) {
+                    const col = KEY_COLORS[i];
+                    const owned = collectedKeys.includes(i);
+                    html += `<span class="key-icon" style="background:${col};opacity:${owned ? 1 : 0.3}"></span>`;
+                }
+                statusBar.innerHTML = html;
+            } else if (mode === 'Mirror Maze') {
+                statusBar.innerHTML = `<span style="color:${mirrorFlipped ? '#ff6b6b' : '#00e676'}">${mirrorFlipped ? 'REVERSED' : 'NORMAL'}</span>`;
+            }
+        }
+
+        // ========== DRAWING ==========
+
+        function distTo(x1, y1, x2, y2) {
+            return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const mode = currentVariation.name;
+            const isDark = mode === 'Dark Maze';
+
+            // Draw base maze
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    const cellVal = grid[y][x];
+                    if (isDark) {
+                        const dist = distTo(player.x, player.y, x, y);
+                        if (dist > darkRevealRadius) {
+                            ctx.fillStyle = '#0a0a15';
+                            ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                            continue;
+                        }
+                        const alpha = 1 - (dist / (darkRevealRadius + 1));
+                        if (cellVal === 1) {
+                            ctx.fillStyle = `rgba(15,52,96,${alpha})`;
+                        } else {
+                            ctx.fillStyle = `rgba(22,33,62,${alpha})`;
+                        }
                     } else {
-                        ctx.fillStyle = '#16213e';
+                        if (cellVal === 1) {
+                            ctx.fillStyle = '#0f3460';
+                        } else if (cellVal >= 10 && cellVal <= 12) {
+                            // Locked door
+                            const lockIdx = cellVal - 10;
+                            ctx.fillStyle = KEY_COLORS[lockIdx];
+                        } else {
+                            ctx.fillStyle = '#16213e';
+                        }
                     }
                     ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
                 }
             }
 
-            // Draw grid lines for walls
+            // Wall grid lines (skip in dark mode for hidden cells)
             ctx.strokeStyle = '#1a1a4e';
             ctx.lineWidth = 1;
             for (let y = 0; y < ROWS; y++) {
                 for (let x = 0; x < COLS; x++) {
                     if (grid[y][x] === 1) {
+                        if (isDark && distTo(player.x, player.y, x, y) > darkRevealRadius) continue;
                         ctx.strokeRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
                     }
                 }
             }
 
-            // Exit glow
-            ctx.fillStyle = '#00e676';
-            ctx.shadowColor = '#00e676';
-            ctx.shadowBlur = 12;
-            ctx.fillRect(exit.x * CELL_SIZE + 4, exit.y * CELL_SIZE + 4, CELL_SIZE - 8, CELL_SIZE - 8);
-            ctx.shadowBlur = 0;
+            // Draw locked doors with X pattern
+            if (mode === 'Key & Lock') {
+                for (const lock of locks) {
+                    if (grid[lock.y][lock.x] >= 10) {
+                        const lx = lock.x * CELL_SIZE;
+                        const ly = lock.y * CELL_SIZE;
+                        ctx.strokeStyle = '#1a1a2e';
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.moveTo(lx + 5, ly + 5);
+                        ctx.lineTo(lx + CELL_SIZE - 5, ly + CELL_SIZE - 5);
+                        ctx.moveTo(lx + CELL_SIZE - 5, ly + 5);
+                        ctx.lineTo(lx + 5, ly + CELL_SIZE - 5);
+                        ctx.stroke();
+                        ctx.lineWidth = 1;
+                    }
+                }
+            }
+
+            // Draw keys
+            if (mode === 'Key & Lock') {
+                for (const key of keys) {
+                    if (key.collected) continue;
+                    const kx = key.x * CELL_SIZE + CELL_SIZE / 2;
+                    const ky = key.y * CELL_SIZE + CELL_SIZE / 2;
+                    ctx.fillStyle = KEY_COLORS[key.color];
+                    ctx.shadowColor = KEY_COLORS[key.color];
+                    ctx.shadowBlur = 8;
+                    // Draw key shape (diamond)
+                    ctx.beginPath();
+                    ctx.moveTo(kx, ky - 8);
+                    ctx.lineTo(kx + 6, ky);
+                    ctx.lineTo(kx, ky + 8);
+                    ctx.lineTo(kx - 6, ky);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            // Draw portals
+            if (mode === 'Portal Maze') {
+                const time = Date.now() / 500;
+                for (const p of portals) {
+                    const pulse = 4 + Math.sin(time + p.color) * 2;
+                    const colors = PORTAL_COLORS[p.color];
+                    // Portal A
+                    ctx.fillStyle = colors[0];
+                    ctx.shadowColor = colors[0];
+                    ctx.shadowBlur = pulse * 2;
+                    ctx.beginPath();
+                    ctx.arc(p.ax * CELL_SIZE + CELL_SIZE / 2, p.ay * CELL_SIZE + CELL_SIZE / 2, pulse, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Portal B
+                    ctx.fillStyle = colors[1];
+                    ctx.shadowColor = colors[1];
+                    ctx.beginPath();
+                    ctx.arc(p.bx * CELL_SIZE + CELL_SIZE / 2, p.by * CELL_SIZE + CELL_SIZE / 2, pulse, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            // Draw ice floor pattern
+            if (mode === 'Ice Maze') {
+                ctx.strokeStyle = 'rgba(100, 200, 255, 0.15)';
+                ctx.lineWidth = 1;
+                for (let y = 0; y < ROWS; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        if (grid[y][x] === 0) {
+                            const cx = x * CELL_SIZE;
+                            const cy = y * CELL_SIZE;
+                            ctx.beginPath();
+                            ctx.moveTo(cx + 5, cy + 10);
+                            ctx.lineTo(cx + 25, cy + 10);
+                            ctx.moveTo(cx + 8, cy + 20);
+                            ctx.lineTo(cx + 22, cy + 20);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+
+            // Exit (check visibility in dark mode)
+            if (!isDark || distTo(player.x, player.y, exit.x, exit.y) <= darkRevealRadius) {
+                ctx.fillStyle = '#00e676';
+                ctx.shadowColor = '#00e676';
+                ctx.shadowBlur = 12;
+                ctx.fillRect(exit.x * CELL_SIZE + 4, exit.y * CELL_SIZE + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+                ctx.shadowBlur = 0;
+            }
 
             // Player
             ctx.fillStyle = '#e94560';
@@ -240,19 +505,100 @@
             ctx.fill();
             ctx.shadowBlur = 0;
 
+            // Dark mode: overlay radial gradient for smooth falloff
+            if (isDark) {
+                const px = player.x * CELL_SIZE + CELL_SIZE / 2;
+                const py = player.y * CELL_SIZE + CELL_SIZE / 2;
+                const radius = (darkRevealRadius + 0.5) * CELL_SIZE;
+                const grad = ctx.createRadialGradient(px, py, radius * 0.4, px, py, radius);
+                grad.addColorStop(0, 'rgba(10,10,21,0)');
+                grad.addColorStop(1, 'rgba(10,10,21,0.95)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            // Mirror indicator on canvas
+            if (mode === 'Mirror Maze' && mirrorFlipped) {
+                ctx.fillStyle = 'rgba(255, 100, 100, 0.15)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
             if (won) {
                 messageEl.textContent = 'You escaped! Time: ' + timerEl.textContent;
                 messageEl.style.color = '#00e676';
             }
         }
 
+        // ========== MOVEMENT ==========
+
+        function canMoveTo(nx, ny) {
+            if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return false;
+            const cellVal = grid[ny][nx];
+            if (cellVal === 1) return false;
+            // Locked doors
+            if (cellVal >= 10 && cellVal <= 12) {
+                const lockIdx = cellVal - 10;
+                if (collectedKeys.includes(lockIdx)) {
+                    grid[ny][nx] = 0; // unlock
+                    return true;
+                }
+                return false;
+            }
+            return true;
+        }
+
         function movePlayer(dx, dy) {
-            if (won) return;
+            if (won || sliding) return;
+            const mode = currentVariation.name;
+
+            // Mirror: reverse controls
+            if (mode === 'Mirror Maze' && mirrorFlipped) {
+                dx = -dx;
+                dy = -dy;
+            }
+
+            if (mode === 'Ice Maze') {
+                // Slide until hitting a wall
+                sliding = true;
+                let nx = player.x + dx;
+                let ny = player.y + dy;
+                if (!canMoveTo(nx, ny)) {
+                    sliding = false;
+                    return;
+                }
+                function slideStep() {
+                    player.x = nx;
+                    player.y = ny;
+                    checkPickups();
+                    if (player.x === exit.x && player.y === exit.y) {
+                        won = true;
+                        stopTimer();
+                        sliding = false;
+                        draw();
+                        return;
+                    }
+                    const nextX = nx + dx;
+                    const nextY = ny + dy;
+                    if (canMoveTo(nextX, nextY)) {
+                        nx = nextX;
+                        ny = nextY;
+                        draw();
+                        setTimeout(slideStep, 50);
+                    } else {
+                        sliding = false;
+                        draw();
+                    }
+                }
+                slideStep();
+                return;
+            }
+
             const nx = player.x + dx;
             const ny = player.y + dy;
-            if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && grid[ny][nx] === 0) {
+            if (canMoveTo(nx, ny)) {
                 player.x = nx;
                 player.y = ny;
+                checkPickups();
                 if (player.x === exit.x && player.y === exit.y) {
                     won = true;
                     stopTimer();
@@ -261,25 +607,113 @@
             }
         }
 
+        function checkPickups() {
+            const mode = currentVariation.name;
+
+            // Check portals
+            if (mode === 'Portal Maze') {
+                for (const p of portals) {
+                    if (player.x === p.ax && player.y === p.ay) {
+                        player.x = p.bx;
+                        player.y = p.by;
+                        return;
+                    } else if (player.x === p.bx && player.y === p.by) {
+                        player.x = p.ax;
+                        player.y = p.ay;
+                        return;
+                    }
+                }
+            }
+
+            // Check keys
+            if (mode === 'Key & Lock') {
+                for (const key of keys) {
+                    if (!key.collected && player.x === key.x && player.y === key.y) {
+                        key.collected = true;
+                        collectedKeys.push(key.color);
+                        updateStatusBar();
+                    }
+                }
+            }
+        }
+
+        function breakWall() {
+            if (currentVariation.name !== 'Breakable Walls' || breakCharges <= 0 || won) return;
+            // Break any adjacent wall
+            const dirs = [
+                { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
+                { dx: -1, dy: 0 }, { dx: 1, dy: 0 }
+            ];
+            // Find the wall in the direction the player last moved, or just break the first adjacent wall
+            // We'll use a simple approach: break all adjacent walls (one at a time, priority order)
+            for (const d of dirs) {
+                const wx = player.x + d.dx;
+                const wy = player.y + d.dy;
+                if (wx > 0 && wx < COLS - 1 && wy > 0 && wy < ROWS - 1 && grid[wy][wx] === 1) {
+                    grid[wy][wx] = 0;
+                    breakCharges--;
+                    updateStatusBar();
+                    draw();
+                    return;
+                }
+            }
+        }
+
+        // ========== GAME MANAGEMENT ==========
+
         function startGame() {
             won = false;
+            sliding = false;
             player = { x: 1, y: 1 };
             messageEl.textContent = '';
+            statusBar.innerHTML = '';
+            extraHudEl.textContent = '';
+            clearInterval(mirrorTimer);
+
             currentVariation = pickRandomVariation();
             varNameEl.textContent = currentVariation.name;
             varDescEl.textContent = currentVariation.desc;
             levelNumEl.textContent = currentLevel;
+
             generateMaze();
+
+            // Setup variation-specific elements
+            const mode = currentVariation.name;
+            if (mode === 'Portal Maze') setupPortals();
+            if (mode === 'Key & Lock') setupKeysAndLocks();
+            if (mode === 'Breakable Walls') setupBreakableWalls();
+            if (mode === 'Mirror Maze') setupMirror();
+
+            updateStatusBar();
             startTimer();
             draw();
+
+            // Animate portals
+            if (mode === 'Portal Maze') {
+                cancelAnimationFrame(portalAnimFrame);
+                animatePortals();
+            }
+        }
+
+        let portalAnimFrame = 0;
+        function animatePortals() {
+            if (currentVariation.name !== 'Portal Maze' || won) return;
+            draw();
+            portalAnimFrame = requestAnimationFrame(animatePortals);
         }
 
         newGameBtn.addEventListener('click', () => {
             currentLevel++;
+            cancelAnimationFrame(portalAnimFrame);
             startGame();
         });
 
         document.addEventListener('keydown', (e) => {
+            if (e.key === ' ' || e.key === 'Space') {
+                e.preventDefault();
+                breakWall();
+                return;
+            }
             switch (e.key) {
                 case 'ArrowUp': e.preventDefault(); movePlayer(0, -1); break;
                 case 'ArrowDown': e.preventDefault(); movePlayer(0, 1); break;
