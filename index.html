@@ -158,23 +158,32 @@
         function generateMaze() {
             initGrid();
             const stack = [];
-            grid[1][1] = 0;
-            stack.push({ x: 1, y: 1 });
-            const dirs = [
-                { dx: 0, dy: -2 }, { dx: 0, dy: 2 },
-                { dx: -2, dy: 0 }, { dx: 2, dy: 0 }
+            const startX = 1;
+            const startY = 1;
+            grid[startY][startX] = 0;
+            stack.push({ x: startX, y: startY });
+
+            const directions = [
+                { dx: 0, dy: -2 },
+                { dx: 0, dy: 2 },
+                { dx: -2, dy: 0 },
+                { dx: 2, dy: 0 }
             ];
+
             while (stack.length > 0) {
-                const cur = stack[stack.length - 1];
-                const nbrs = [];
-                for (const d of dirs) {
-                    const nx = cur.x + d.dx, ny = cur.y + d.dy;
+                const current = stack[stack.length - 1];
+                const neighbors = [];
+
+                for (const dir of directions) {
+                    const nx = current.x + dir.dx;
+                    const ny = current.y + dir.dy;
                     if (nx > 0 && nx < COLS - 1 && ny > 0 && ny < ROWS - 1 && grid[ny][nx] === 1) {
-                        nbrs.push({ x: nx, y: ny, wx: cur.x + d.dx / 2, wy: cur.y + d.dy / 2 });
+                        neighbors.push({ x: nx, y: ny, wx: current.x + dir.dx / 2, wy: current.y + dir.dy / 2 });
                     }
                 }
-                if (nbrs.length > 0) {
-                    const next = nbrs[Math.floor(Math.random() * nbrs.length)];
+
+                if (neighbors.length > 0) {
+                    const next = neighbors[Math.floor(Math.random() * neighbors.length)];
                     grid[next.wy][next.wx] = 0;
                     grid[next.y][next.x] = 0;
                     stack.push({ x: next.x, y: next.y });
@@ -182,29 +191,52 @@
                     stack.pop();
                 }
             }
+
             grid[exit.y][exit.x] = 0;
         }
 
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+
             for (let y = 0; y < ROWS; y++) {
                 for (let x = 0; x < COLS; x++) {
-                    ctx.fillStyle = grid[y][x] === 1 ? '#0f3460' : '#16213e';
+                    if (grid[y][x] === 1) {
+                        ctx.fillStyle = '#0f3460';
+                    } else {
+                        ctx.fillStyle = '#16213e';
+                    }
                     ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
                 }
             }
+
+            // Draw grid lines for walls
+            ctx.strokeStyle = '#1a1a4e';
+            ctx.lineWidth = 1;
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    if (grid[y][x] === 1) {
+                        ctx.strokeRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+            }
+
             // Exit glow
             ctx.fillStyle = '#00e676';
             ctx.shadowColor = '#00e676';
             ctx.shadowBlur = 12;
             ctx.fillRect(exit.x * CELL_SIZE + 4, exit.y * CELL_SIZE + 4, CELL_SIZE - 8, CELL_SIZE - 8);
             ctx.shadowBlur = 0;
+
             // Player
             ctx.fillStyle = '#e94560';
             ctx.shadowColor = '#e94560';
             ctx.shadowBlur = 10;
             ctx.beginPath();
-            ctx.arc(player.x * CELL_SIZE + CELL_SIZE / 2, player.y * CELL_SIZE + CELL_SIZE / 2, CELL_SIZE / 3, 0, Math.PI * 2);
+            ctx.arc(
+                player.x * CELL_SIZE + CELL_SIZE / 2,
+                player.y * CELL_SIZE + CELL_SIZE / 2,
+                CELL_SIZE / 3, 0, Math.PI * 2
+            );
             ctx.fill();
             ctx.shadowBlur = 0;
 
