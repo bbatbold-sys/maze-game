@@ -4,9 +4,195 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Maze Game</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            color: #eee;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: #e94560;
+        }
+        #info {
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+            color: #aaa;
+        }
+        canvas {
+            border: 3px solid #e94560;
+            border-radius: 6px;
+            background: #16213e;
+        }
+        #message {
+            margin-top: 15px;
+            font-size: 1.3rem;
+            min-height: 30px;
+        }
+        #controls {
+            margin-top: 10px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+    </style>
 </head>
 <body>
     <h1>Maze Game</h1>
-    <p>Coming soon...</p>
+    <div id="info">Use arrow keys to navigate</div>
+    <canvas id="mazeCanvas"></canvas>
+    <div id="message"></div>
+    <div id="controls">Arrow Keys = Move | Reach the green exit to win</div>
+
+    <script>
+        const canvas = document.getElementById('mazeCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageEl = document.getElementById('message');
+
+        const CELL_SIZE = 30;
+        const COLS = 21;
+        const ROWS = 15;
+
+        canvas.width = COLS * CELL_SIZE;
+        canvas.height = ROWS * CELL_SIZE;
+
+        let grid = [];
+        let player = { x: 1, y: 1 };
+        let exit = { x: COLS - 2, y: ROWS - 2 };
+        let won = false;
+
+        function initGrid() {
+            grid = [];
+            for (let y = 0; y < ROWS; y++) {
+                grid[y] = [];
+                for (let x = 0; x < COLS; x++) {
+                    grid[y][x] = 1;
+                }
+            }
+        }
+
+        function generateMaze() {
+            initGrid();
+            const stack = [];
+            const startX = 1;
+            const startY = 1;
+            grid[startY][startX] = 0;
+            stack.push({ x: startX, y: startY });
+
+            const directions = [
+                { dx: 0, dy: -2 },
+                { dx: 0, dy: 2 },
+                { dx: -2, dy: 0 },
+                { dx: 2, dy: 0 }
+            ];
+
+            while (stack.length > 0) {
+                const current = stack[stack.length - 1];
+                const neighbors = [];
+
+                for (const dir of directions) {
+                    const nx = current.x + dir.dx;
+                    const ny = current.y + dir.dy;
+                    if (nx > 0 && nx < COLS - 1 && ny > 0 && ny < ROWS - 1 && grid[ny][nx] === 1) {
+                        neighbors.push({ x: nx, y: ny, wx: current.x + dir.dx / 2, wy: current.y + dir.dy / 2 });
+                    }
+                }
+
+                if (neighbors.length > 0) {
+                    const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+                    grid[next.wy][next.wx] = 0;
+                    grid[next.y][next.x] = 0;
+                    stack.push({ x: next.x, y: next.y });
+                } else {
+                    stack.pop();
+                }
+            }
+
+            grid[exit.y][exit.x] = 0;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    if (grid[y][x] === 1) {
+                        ctx.fillStyle = '#0f3460';
+                    } else {
+                        ctx.fillStyle = '#16213e';
+                    }
+                    ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                }
+            }
+
+            // Draw grid lines for walls
+            ctx.strokeStyle = '#1a1a4e';
+            ctx.lineWidth = 1;
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    if (grid[y][x] === 1) {
+                        ctx.strokeRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+            }
+
+            // Exit
+            ctx.fillStyle = '#00e676';
+            ctx.shadowColor = '#00e676';
+            ctx.shadowBlur = 12;
+            ctx.fillRect(exit.x * CELL_SIZE + 4, exit.y * CELL_SIZE + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+            ctx.shadowBlur = 0;
+
+            // Player
+            ctx.fillStyle = '#e94560';
+            ctx.shadowColor = '#e94560';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(
+                player.x * CELL_SIZE + CELL_SIZE / 2,
+                player.y * CELL_SIZE + CELL_SIZE / 2,
+                CELL_SIZE / 3, 0, Math.PI * 2
+            );
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            if (won) {
+                messageEl.textContent = 'You escaped the maze!';
+                messageEl.style.color = '#00e676';
+            }
+        }
+
+        function movePlayer(dx, dy) {
+            if (won) return;
+            const nx = player.x + dx;
+            const ny = player.y + dy;
+            if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && grid[ny][nx] === 0) {
+                player.x = nx;
+                player.y = ny;
+                if (player.x === exit.x && player.y === exit.y) {
+                    won = true;
+                }
+                draw();
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            switch (e.key) {
+                case 'ArrowUp': e.preventDefault(); movePlayer(0, -1); break;
+                case 'ArrowDown': e.preventDefault(); movePlayer(0, 1); break;
+                case 'ArrowLeft': e.preventDefault(); movePlayer(-1, 0); break;
+                case 'ArrowRight': e.preventDefault(); movePlayer(1, 0); break;
+            }
+        });
+
+        generateMaze();
+        draw();
+    </script>
 </body>
 </html>
