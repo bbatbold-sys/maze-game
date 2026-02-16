@@ -72,6 +72,19 @@
             color: #666;
             font-size: 0.85rem;
         }
+        .best-time { color: #feca57; }
+        .new-best { color: #00e676; animation: pulse 0.5s ease-in-out 3; }
+        @keyframes pulse { 50% { transform: scale(1.2); } }
+        #sound-toggle {
+            background: none;
+            border: 1px solid #555;
+            color: #aaa;
+            padding: 4px 10px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        #sound-toggle:hover { border-color: #e94560; color: #e94560; background: none; }
         #status-bar {
             margin-top: 6px;
             display: flex;
@@ -96,6 +109,7 @@
     <div id="hud">
         <span>Level: <span class="value" id="levelNum">1</span> / <span class="value" id="totalLevels">17</span></span>
         <span>Time: <span class="value" id="timer">0:00</span></span>
+        <span class="best-time" id="bestTime"></span>
         <span id="extraHud"></span>
     </div>
     <div id="variation-banner">
@@ -108,6 +122,7 @@
     <div id="bottom-bar">
         <button id="newGameBtn">Next Level</button>
         <div id="controls">Arrow Keys = Move | Reach the green exit to win</div>
+        <button id="sound-toggle" onclick="toggleSound()">Sound: ON</button>
     </div>
 
     <script>
@@ -121,6 +136,97 @@
         const newGameBtn = document.getElementById('newGameBtn');
         const extraHudEl = document.getElementById('extraHud');
         const statusBar = document.getElementById('status-bar');
+        const bestTimeEl = document.getElementById('bestTime');
+        const soundToggleBtn = document.getElementById('sound-toggle');
+
+        // ========== SOUND ENGINE (Web Audio API) ==========
+        let audioCtx;
+        let soundEnabled = true;
+
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+        document.addEventListener('keydown', initAudio, { once: true });
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            soundToggleBtn.textContent = 'Sound: ' + (soundEnabled ? 'ON' : 'OFF');
+        }
+
+        function playTone(freq, type, duration, vol) {
+            if (!soundEnabled || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, now);
+            gain.gain.setValueAtTime(vol, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + duration);
+        }
+
+        function playSweep(startFreq, endFreq, type, duration, vol) {
+            if (!soundEnabled || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(startFreq, now);
+            osc.frequency.exponentialRampToValueAtTime(endFreq, now + duration);
+            gain.gain.setValueAtTime(vol, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + duration);
+        }
+
+        function sfxMove() { playTone(800, 'sine', 0.06, 0.15); }
+        function sfxWin() {
+            if (!soundEnabled || !audioCtx) return;
+            [523, 659, 784, 1047].forEach((f, i) => {
+                setTimeout(() => playTone(f, 'sine', 0.25, 0.25), i * 120);
+            });
+        }
+        function sfxPortal() { playSweep(1200, 200, 'sawtooth', 0.35, 0.2); }
+        function sfxBreak() {
+            [150, 280, 450].forEach(f => playSweep(f, 50, 'triangle', 0.15, 0.15));
+        }
+        function sfxKey() { playTone(659, 'sine', 0.25, 0.25); playTone(988, 'sine', 0.3, 0.2); }
+        function sfxGhostCatch() { playSweep(400, 100, 'square', 0.3, 0.2); }
+        function sfxTeleportTrap() { playSweep(600, 1400, 'sawtooth', 0.2, 0.15); }
+        function sfxIceSlide() { playTone(1200, 'sine', 0.04, 0.1); }
+        function sfxSwitch() { playTone(880, 'square', 0.12, 0.15); }
+
+        // ========== HIGH SCORES (localStorage) ==========
+        function getBestTimes() {
+            try { return JSON.parse(localStorage.getItem('mazeBestTimes')) || {}; } catch { return {}; }
+        }
+        function saveBestTime(level, seconds) {
+            const times = getBestTimes();
+            const key = 'level_' + level;
+            if (!times[key] || seconds < times[key]) {
+                times[key] = seconds;
+                localStorage.setItem('mazeBestTimes', JSON.stringify(times));
+                return true; // new best
+            }
+            return false;
+        }
+        function showBestTime(level) {
+            const times = getBestTimes();
+            const best = times['level_' + level];
+            if (best) {
+                const m = Math.floor(best / 60);
+                const s = best % 60;
+                bestTimeEl.innerHTML = 'Best: <span class="value">' + m + ':' + String(s).padStart(2, '0') + '</span>';
+            } else {
+                bestTimeEl.textContent = '';
+            }
+        }
 
         const CELL_SIZE = 18;
         const COLS = 41;
@@ -466,7 +572,7 @@
                 const next = ghostTrail.shift();
                 ghostPos = { x: next.x, y: next.y };
                 if (ghostPos.x === player.x && ghostPos.y === player.y) {
-                    // Ghost caught player — reset
+                    sfxGhostCatch();
                     player = { x: 1, y: 1 };
                     displayX = 1; displayY = 1;
                     ghostTrail = [{ x: 1, y: 1 }];
@@ -879,8 +985,8 @@
                     if (slideIdx >= slidePositions.length) { sliding = false; return; }
                     const pos = slidePositions[slideIdx];
                     player.x = pos.x; player.y = pos.y;
-                    checkPickups(); slideIdx++;
-                    if (player.x === exit.x && player.y === exit.y) { won = true; stopTimer(); sliding = false; return; }
+                    sfxIceSlide(); checkPickups(); slideIdx++;
+                    if (player.x === exit.x && player.y === exit.y) { winLevel(); sliding = false; return; }
                     setTimeout(slideNext, 80);
                 }
                 slideNext();
@@ -905,6 +1011,7 @@
             if (canMoveTo(nx, ny)) {
                 player.x = nx;
                 player.y = ny;
+                sfxMove();
 
                 // Fog reveal
                 if (mode === 'Fog of War') revealAround(player.x, player.y);
@@ -913,7 +1020,7 @@
                 if (mode === 'Ghost Trail') ghostTrail.push({ x: player.x, y: player.y });
 
                 checkPickups();
-                if (player.x === exit.x && player.y === exit.y) { won = true; stopTimer(); }
+                if (player.x === exit.x && player.y === exit.y) { winLevel(); }
 
             }
         }
@@ -942,7 +1049,7 @@
                 player.x = nx;
                 player.y = ny;
                 checkPickups();
-                if (player.x === exit.x && player.y === exit.y) { won = true; stopTimer(); }
+                if (player.x === exit.x && player.y === exit.y) { winLevel(); }
             }
         }
 
@@ -953,14 +1060,25 @@
             gravityInterval = setInterval(() => gravityTick(), 120);
         }
 
+        function winLevel() {
+            won = true;
+            stopTimer();
+            sfxWin();
+            const isNewBest = saveBestTime(currentLevel, timerSeconds);
+            if (isNewBest) {
+                bestTimeEl.innerHTML = '<span class="new-best">NEW BEST!</span>';
+            }
+            showBestTime(currentLevel);
+        }
+
         function checkPickups() {
             const mode = currentVariation.name;
 
             // Portals
             if (mode === 'Portal Maze') {
                 for (const p of portals) {
-                    if (player.x === p.ax && player.y === p.ay) { player.x = p.bx; player.y = p.by; displayX = player.x; displayY = player.y; return; }
-                    if (player.x === p.bx && player.y === p.by) { player.x = p.ax; player.y = p.ay; displayX = player.x; displayY = player.y; return; }
+                    if (player.x === p.ax && player.y === p.ay) { player.x = p.bx; player.y = p.by; displayX = player.x; displayY = player.y; sfxPortal(); return; }
+                    if (player.x === p.bx && player.y === p.by) { player.x = p.ax; player.y = p.ay; displayX = player.x; displayY = player.y; sfxPortal(); return; }
                 }
             }
 
@@ -968,7 +1086,7 @@
             if (mode === 'Key & Lock') {
                 for (const key of keys) {
                     if (!key.collected && player.x === key.x && player.y === key.y) {
-                        key.collected = true; collectedKeys.push(key.color); updateStatusBar();
+                        key.collected = true; collectedKeys.push(key.color); sfxKey(); updateStatusBar();
                     }
                 }
             }
@@ -981,7 +1099,7 @@
                         const dest = paths[Math.floor(Math.random() * paths.length)];
                         player.x = dest.x; player.y = dest.y;
                         displayX = player.x; displayY = player.y;
-                        return;
+                        sfxTeleportTrap(); return;
                     }
                 }
             }
@@ -991,10 +1109,9 @@
                 for (const sw of switches) {
                     if (!sw.activated && player.x === sw.x && player.y === sw.y) {
                         sw.activated = true;
-                        // Open the corresponding wall
                         const wall = switchWalls.find(w => w.id === sw.id);
                         if (wall) grid[wall.y][wall.x] = 0;
-                        updateStatusBar();
+                        sfxSwitch(); updateStatusBar();
                     }
                 }
             }
@@ -1006,7 +1123,7 @@
             for (const d of dirs) {
                 const wx = player.x + d.dx, wy = player.y + d.dy;
                 if (wx > 0 && wx < COLS - 1 && wy > 0 && wy < ROWS - 1 && grid[wy][wx] === 1) {
-                    grid[wy][wx] = 0; breakCharges--; updateStatusBar(); return;
+                    grid[wy][wx] = 0; breakCharges--; sfxBreak(); updateStatusBar(); return;
                 }
             }
         }
@@ -1058,6 +1175,7 @@
             if (mode === 'Memory Maze') setupMemoryMaze();
 
             updateStatusBar();
+            showBestTime(currentLevel);
             startTimer();
             draw();
         }
